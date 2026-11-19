@@ -122,6 +122,7 @@ def main():
     now = datetime.now(TZ)
     today = now.date()
     state = json.load(open(HIST)) if os.path.exists(HIST) else {}
+    meta = state.setdefault("_meta", {})
     rows, warnings = [], []
 
     for v in fetch_variants():
@@ -132,6 +133,14 @@ def main():
             warnings.append(f"{v['sifra']} {v['naziv']}: nema metafield sidrena_cijena, upisano {sid:.2f}")
         if not s["hist"]:  # prvi put: početna točka povijesti je sidrena cijena na referentni datum
             s["hist"][CFG["ANCHOR_DATE"]] = sid
+        if not meta.get("backfilled"):
+            # JEDNOKRATNO (interna podloga za "najnižu cijenu u 30 dana", ne objavljuje se):
+            # vlasnik je potvrdio da se cijene nisu mijenjale od 10.9.2026., pa se svaki
+            # dan do jučer upisuje sidrena cijena.
+            d = max(datetime.fromisoformat(CFG["ANCHOR_DATE"]).date(), today - timedelta(days=35))
+            while d < today:
+                s["hist"].setdefault(d.isoformat(), sid)
+                d += timedelta(days=1)
         on_sale = v["compare"] is not None and v["compare"] > v["price"]
         lowest = ""
         if on_sale:
@@ -186,6 +195,7 @@ def main():
         "padding:0 16px;color:#111}h1{font-weight:600}li{margin:6px 0}a{color:#111}span{color:#666}</style>"
         f"<h1>Arhiva 30 dana</h1><ul>{items}</ul></html>")
 
+    meta["backfilled"] = True
     json.dump(state, open(HIST, "w"), indent=1)
     print(f"OK: {fname}, redaka: {len(rows)}, u arhivi: {len(files)}")
     for w_ in warnings:
