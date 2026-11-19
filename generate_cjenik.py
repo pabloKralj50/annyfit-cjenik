@@ -36,8 +36,9 @@ query($cursor: String) {
   products(first: 50, after: $cursor, query: "status:active") {
     pageInfo { hasNextPage endCursor }
     nodes {
-      title vendor
+      id title vendor
       sidrena: metafield(namespace: "custom", key: "sidrena_cijena") { value }
+      najniza: metafield(namespace: "custom", key: "najniza_cijena_30") { value }
       variants(first: 100) { nodes {
         id sku barcode title price compareAtPrice availableForSale
       } }
@@ -95,9 +96,11 @@ def fetch_variants():
     if os.environ.get("MOCK"):
         return [
             {"naziv": "ANNY CROP TOP - S", "sifra": "CT-S", "marka": "ANNY", "barkod": "3850000000011",
-             "price": 35.0, "compare": None, "avail": True, "sidrena": 35.0, "id": "gid://mock/1"},
+             "price": 35.0, "compare": None, "avail": True, "sidrena": 35.0, "id": "gid://mock/1",
+             "pid": "gid://mock/p1", "najniza_cur": 30.0},
             {"naziv": "ANNY AKTIV TAJICE - M", "sifra": "AT-M", "marka": "ANNY", "barkod": "",
-             "price": 39.0, "compare": 49.0, "avail": False, "sidrena": 49.0, "id": "gid://mock/2"},
+             "price": 39.0, "compare": 49.0, "avail": False, "sidrena": 49.0, "id": "gid://mock/2",
+             "pid": "gid://mock/p2", "najniza_cur": None},
         ]
     out, cursor = [], None
     while True:
@@ -112,10 +115,43 @@ def fetch_variants():
                     "compare": float(v["compareAtPrice"]) if v["compareAtPrice"] else None,
                     "avail": bool(v["availableForSale"]),
                     "sidrena": money((p["sidrena"] or {}).get("value")), "id": v["id"],
+                    "pid": p["id"], "najniza_cur": money((p["najniza"] or {}).get("value")),
                 })
         if not d["pageInfo"]["hasNextPage"]:
             return out
         cursor = d["pageInfo"]["endCursor"]
+
+
+SET_M = """mutation($m:[MetafieldsSetInput!]!){metafieldsSet(metafields:$m){userErrors{message}}}"""
+DEL_M = """mutation($m:[MetafieldIdentifierInput!]!){metafieldsDelete(metafields:$m){userErrors{message}}}"""
+
+
+def sync_najniza(prod):
+    """Metafield custom.najniza_cijena_30 postoji SAMO dok je proizvod na akciji; inače se briše.
+    Greška ovdje ne smije srušiti cjenik."""
+    to_set, to_del = [], []
+    for pid, p in prod.items():
+        if p["refs"]:
+            val = min(p["refs"])
+            if p["cur"] is None or abs(p["cur"] - val) > 0.004:
+                to_set.append({"ownerId": pid, "namespace": "custom", "key": "najniza_cijena_30",
+                               "type": "number_decimal", "value": f"{val:.2f}"})
+        elif p["cur"] is not None:
+            to_del.append({"ownerId": pid, "namespace": "custom", "key": "najniza_cijena_30"})
+    print(f"Metafield najniza_cijena_30: za upis {len(to_set)}, za brisanje {len(to_del)}")
+    if os.environ.get("MOCK"):
+        return
+    try:
+        for i in range(0, len(to_set), 25):
+            err = gql(SET_M, {"m": to_set[i:i + 25]})["metafieldsSet"]["userErrors"]
+            if err:
+                print("UPOZORENJE metafield:", err)
+        for i in range(0, len(to_del), 25):
+            err = gql(DEL_M, {"m": to_del[i:i + 25]})["metafieldsDelete"]["userErrors"]
+            if err:
+                print("UPOZORENJE metafield:", err)
+    except Exception as e:  # npr. nedostaje write_products
+        print("UPOZORENJE: upis metafielda nije uspio:", e)
 
 
 def main():
@@ -124,6 +160,7 @@ def main():
     state = json.load(open(HIST)) if os.path.exists(HIST) else {}
     meta = state.setdefault("_meta", {})
     rows, warnings = [], []
+    prod = {}  # product id -> {"refs": [najniže cijene varijanti na akciji], "cur": trenutni metafield}
 
     for v in fetch_variants():
         s = state.setdefault(v["id"], {"hist": {}, "sale": None})
@@ -151,6 +188,9 @@ def main():
             lowest = f"{s['sale']['ref']:.2f}"
         else:
             s["sale"] = None
+        p_ = prod.setdefault(v["pid"], {"refs": [], "cur": v["najniza_cur"]})
+        if on_sale:
+            p_["refs"].append(s["sale"]["ref"])
         s["hist"][today.isoformat()] = v["price"]
         keep = (today - timedelta(days=60)).isoformat()
         s["hist"] = {d: p for d, p in s["hist"].items() if d >= keep}
@@ -197,6 +237,7 @@ def main():
 
     meta["backfilled"] = True
     json.dump(state, open(HIST, "w"), indent=1)
+    sync_najniza(prod)
     print(f"OK: {fname}, redaka: {len(rows)}, u arhivi: {len(files)}")
     for w_ in warnings:
         print("UPOZORENJE:", w_)
