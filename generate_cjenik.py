@@ -175,11 +175,16 @@ def main():
         else:
             files.append((ts, n))
     files.sort(reverse=True)
-    items = "\n".join(f'<li><a href="{n}">{n}</a></li>' for _, n in files)
+    entries = [{"name": n, "date": f"{ts:%d.%m.%Y.}", "time": f"{ts:%H:%M}", "url": n} for ts, n in files]
+    json.dump(entries, open(os.path.join(OUT, "arhiva.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, indent=1)
+    items = "\n".join(
+        f'<li><a href="{e["url"]}" download>{e["name"]}</a> <span>({e["date"]})</span></li>' for e in entries)
     open(os.path.join(OUT, "index.html"), "w", encoding="utf-8").write(
-        "<!doctype html><meta charset='utf-8'><title>Cjenik</title><h1>Cjenik (CSV)</h1>"
-        "<p>Zadnji: <a href='cjenik-latest.csv'>cjenik-latest.csv</a></p>"
-        f"<h2>Arhiva (zadnjih 30 dana)</h2><ul>{items}</ul>")
+        "<!doctype html><html lang='hr'><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
+        "<title>Arhiva 30 dana</title><style>body{font:16px/1.7 system-ui,sans-serif;max-width:720px;margin:40px auto;"
+        "padding:0 16px;color:#111}h1{font-weight:600}li{margin:6px 0}a{color:#111}span{color:#666}</style>"
+        f"<h1>Arhiva 30 dana</h1><ul>{items}</ul></html>")
 
     json.dump(state, open(HIST, "w"), indent=1)
     print(f"OK: {fname}, redaka: {len(rows)}, u arhivi: {len(files)}")
