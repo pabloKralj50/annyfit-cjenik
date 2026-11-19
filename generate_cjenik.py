@@ -193,7 +193,7 @@ def main():
         "<!doctype html><html lang='hr'><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
         "<title>Arhiva 30 dana</title><style>body{font:16px/1.7 system-ui,sans-serif;max-width:720px;margin:40px auto;"
         "padding:0 16px;color:#111}h1{font-weight:600}li{margin:6px 0}a{color:#111}span{color:#666}</style>"
-        f"<h1>Arhiva 30 dana</h1><ul>{items}</ul></html>")
+        f"<ul>{items}</ul></html>")
 
     meta["backfilled"] = True
     json.dump(state, open(HIST, "w"), indent=1)
